@@ -1477,12 +1477,33 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
         Initialize(&info);
 
-        // Parse arguments
-        if (args.size() > 1)
+        // Parse arguments: [model.alo] [--capture out.png]
+        wstring modelFile, capturePath;
+        for (size_t i = 1; i < args.size(); i++)
         {
-            LoadFile(&info, args[1]);
+            if (args[i] == L"--capture" && i + 1 < args.size())
+                capturePath = args[++i];
+            else if (modelFile.empty())
+                modelFile = args[i];
         }
-      
+
+        if (!modelFile.empty())
+        {
+            LoadFile(&info, modelFile);
+        }
+
+        if (!capturePath.empty() && info.engine != NULL)
+        {
+            // Frame the scene from the front, slightly above, looking at the origin,
+            // then request a one-shot headless capture (saved before present; quits).
+            Camera cam;
+            cam.m_position = Vector3(0.0f, -7.5f, 1.4f);
+            cam.m_target   = Vector3(0.0f,  0.0f, 0.0f);
+            cam.m_up       = Vector3(0.0f,  0.0f, 1.0f);
+            info.engine->SetCamera(cam);
+            info.engine->RequestCapture(capturePath);
+        }
+
         // Main message processing loop
         ShowWindow(info.hMainWnd, SW_SHOWNORMAL);
         HACCEL hAccel = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDR_ACCELERATOR1));	

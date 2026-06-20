@@ -965,11 +965,16 @@ ID3DXEffect* RenderEngine::LoadShader(const std::string& name, bool usePlacehold
         // Create the effect
         if (FAILED(hRes))
         {
+            fwprintf(stderr, L"[shader-gate] D3DXCreateEffect FAILED: %hs (hr=0x%08X)\n", name.c_str(), (unsigned)hRes);
             if (errors != NULL) {
                 Log::WriteError("Unable to load effect %s: %ls:\n%.*s\n", name.c_str(), DXGetErrorDescription( hRes ), errors->GetBufferSize(), errors->GetBufferPointer());
             } else {
                 Log::WriteError("Unable to load effect %s: %ls\n", name.c_str(), DXGetErrorDescription( hRes ));
             }
+        }
+        else
+        {
+            fwprintf(stderr, L"[shader-gate] effect loaded OK: %hs\n", name.c_str());
         }
         SAFE_RELEASE(errors);
     }
@@ -981,6 +986,7 @@ ID3DXEffect* RenderEngine::LoadShader(const std::string& name, bool usePlacehold
 
     if (pEffect == NULL && usePlaceholder)
     {
+        fwprintf(stderr, L"[shader-gate] FALLBACK to placeholder (missing/failed): %hs\n", name.c_str());
         // Load placeholder effect
         HRESULT hRes;
         UINT id = (m_isUaW) ? IDS_MISSING_UAW : IDS_MISSING_EAW;

@@ -116,6 +116,19 @@ void Effect::SetShaderDetail(ShaderDetail detail)
     
     m_selected = &m_techniques[detail];
     m_pEffect->SetTechnique(m_selected->m_handle);
+
+    // [shader-gate] headless diagnostic: which technique actually got selected (or fixed-function
+    // if the DX9 technique was absent / the effect failed to compile). Grep capture stderr.
+    if (m_selected->m_handle != NULL)
+    {
+        D3DXTECHNIQUE_DESC techDesc;
+        if (SUCCEEDED(m_pEffect->GetTechniqueDesc(m_selected->m_handle, &techDesc)))
+            fwprintf(stderr, L"[shader-gate] selected technique: %hs (detail=%d)\n", techDesc.Name, (int)detail);
+    }
+    else
+    {
+        fwprintf(stderr, L"[shader-gate] NO technique handle (detail=%d) -> fixed-function\n", (int)detail);
+    }
 }
 
 void Effect::Parse(bool isUaW, int vendorId, bool isShadowMap)

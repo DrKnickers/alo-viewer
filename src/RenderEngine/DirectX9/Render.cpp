@@ -2,6 +2,8 @@
 #include "RenderEngine/DirectX9/RenderObject.h"
 #include "RenderEngine/DirectX9/LightFieldInstance.h"
 #include "General/GameTime.h"
+#include <d3dx9.h>
+#include <cstdio>
 using namespace std;
 
 namespace Alamo {
@@ -695,7 +697,61 @@ void RenderEngine::Render(const RenderOptions& options)
     }
 
     m_pDevice->EndScene();
+
+    if (!m_capturePath.empty())
+    {
+        if (m_captureWarmup > 0)
+        {
+            // Let the scene settle before grabbing the headless frame: the first few
+            // frames are often underlit/incomplete while lighting, the environment and
+            // first-use shader compilation come up. Render (and Present) this frame
+            // normally and try again next frame. Without this the captured PNG is
+            // non-deterministic -- sometimes a correct frame, sometimes near-black.
+            m_captureWarmup--;
+        }
+        else
+        {
+            const bool ok = SaveBackbuffer(m_capturePath);
+            if (!ok)
+                fwprintf(stderr, L"AloViewer: --capture FAILED to write '%ls'\n", m_capturePath.c_str());
+            m_capturePath.clear();
+            PostQuitMessage(ok ? 0 : 1);   // headless --capture: 0 = saved, 1 = failed
+        }
+    }
+
 	m_pDevice->Present(NULL, NULL, NULL, NULL);
+}
+
+// Save the just-rendered backbuffer to a PNG. Resolves MSAA via a plain render
+// target, copies to system memory, then writes the file. Used by --capture.
+// Returns true only if the PNG was actually written.
+bool RenderEngine::SaveBackbuffer(const std::wstring& path)
+{
+    IDirect3DSurface9* pBack = NULL;
+    if (FAILED(m_pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack)) || pBack == NULL)
+        return false;
+
+    D3DSURFACE_DESC desc;
+    pBack->GetDesc(&desc);
+
+    // Resolve (handles MSAA) into a plain render target, then copy to system memory.
+    bool ok = false;
+    IDirect3DSurface9* pResolved = NULL;
+    IDirect3DSurface9* pSysmem   = NULL;
+    if (SUCCEEDED(m_pDevice->CreateRenderTarget(desc.Width, desc.Height, desc.Format,
+            D3DMULTISAMPLE_NONE, 0, FALSE, &pResolved, NULL)) &&
+        SUCCEEDED(m_pDevice->StretchRect(pBack, NULL, pResolved, NULL, D3DTEXF_NONE)) &&
+        SUCCEEDED(m_pDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format,
+            D3DPOOL_SYSTEMMEM, &pSysmem, NULL)) &&
+        SUCCEEDED(m_pDevice->GetRenderTargetData(pResolved, pSysmem)))
+    {
+        ok = SUCCEEDED(D3DXSaveSurfaceToFileW(path.c_str(), D3DXIFF_PNG, pSysmem, NULL, NULL));
+    }
+
+    if (pSysmem)   pSysmem->Release();
+    if (pResolved) pResolved->Release();
+    pBack->Release();
+    return ok;
 }
 
 }

@@ -486,6 +486,13 @@ ObjectTemplate::ObjectTemplate(ptr<Model> model, RenderEngine& engine, VertexMan
                 {
                     // Load texture
                     submesh.m_parameters[k].m_texture = m_engine.LoadTexture(srcmesh.parameters[k].m_texture);
+                    {
+                        ptr<Texture> t = submesh.m_parameters[k].m_texture;
+                        bool ok = (t != NULL) && (t->GetTexture() != NULL);
+                        fwprintf(stderr, L"[tex-gate] param=%hs file=%hs loaded=%d\n",
+                                 srcmesh.parameters[k].m_name.c_str(),
+                                 srcmesh.parameters[k].m_texture.c_str(), ok ? 1 : 0);
+                    }
                 }
             }
         }

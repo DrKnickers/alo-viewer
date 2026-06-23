@@ -66,6 +66,8 @@ private:
 	D3DPRESENT_PARAMETERS  m_presentationParameters;
     D3DCAPS9               m_deviceCaps;
 	HWND				   m_hWnd;
+    std::wstring           m_capturePath;   // non-empty => save after warmup then quit
+    int                    m_captureWarmup = 0; // frames to render before saving the capture
     Camera                 m_camera;
     Matrix                 m_cameraView;
     Matrix                 m_cameraProj;
@@ -154,6 +156,7 @@ private:
     void RenderOverlays(bool showBones) const;
     void RenderBoneNames() const;
     void RenderGround(float groundLevel, D3DCOLOR color);
+    bool SaveBackbuffer(const std::wstring& path);
 
     void SetLegacyLights();
     void InitializeRenderStates();
@@ -179,7 +182,10 @@ public:
     bool                  IsUaW()          const { return m_isUaW; }
 
     IDirect3DDevice9* GetDevice() const;
-    
+
+    // Headless capture (see IRenderEngine::RequestCapture).
+    void RequestCapture(const std::wstring& path) { m_capturePath = path; m_captureWarmup = 16; }
+
     void RegisterParticleSystemInstance(ParticleSystemInstance* instance);
     void UnregisterParticleSystemInstance(ParticleSystemInstance* instance);
 

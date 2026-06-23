@@ -4,6 +4,7 @@
 #include "General/Objects.h"
 #include "General/GameTypes.h"
 #include "Assets/Assets.h"
+#include <string>
 
 namespace Alamo
 {
@@ -75,6 +76,10 @@ public:
     virtual const Environment&    GetEnvironment() const = 0;
 
 	virtual void Render(const RenderOptions& options) = 0;
+
+    // Headless capture: the next rendered frame is saved to this path (PNG) before
+    // present, then the app quits. Used by the --capture command-line flag.
+    virtual void RequestCapture(const std::wstring& path) = 0;
 
     // Factory methods
     virtual ptr<IObjectTemplate> CreateObjectTemplate(ptr<Model> model) = 0;

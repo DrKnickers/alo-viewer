@@ -19,6 +19,9 @@ void Model::ReadBone(ChunkReader& reader, Bone& bone)
     Verify(type == 0x205 || type == 0x206);
 
     long parent = reader.readInteger();
+    // parent is a file-controlled index into m_bones (-1 means "no parent").
+    // Reject an out-of-range index instead of reading past the vector.
+    Verify(parent < 0 || (size_t)parent < m_bones.size());
     bone.parent    = (parent >= 0) ? &m_bones[parent] : NULL;
     bone.visible   = (reader.readInteger() != 0);
     bone.billboard = BBT_DISABLE;
@@ -48,7 +51,12 @@ void Model::ReadSkeleton(ChunkReader& reader)
 {
     Verify(reader.next() == 0x200);
     Verify(reader.next() == 0x201);
-    m_bones.resize(reader.readInteger());
+    const unsigned long boneCount = reader.readInteger();
+    // A model cannot contain more bones than there are bytes left in the file
+    // (each bone is its own chunk). Bound the count before resizing so a
+    // crafted .alo can't drive a huge allocation.
+    Verify(boneCount <= reader.bytesLeft());
+    m_bones.resize(boneCount);
     
     vector<size_t> siblings(m_bones.size(), -1);
     size_t rootSibling = -1;
@@ -96,10 +104,12 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
 
     Verify(reader.next() == 0x10000);
     
-    // Read vertex and primitive count
+    // Read vertex and primitive count. Defer the (attacker-controlled)
+    // allocations until the data chunks below, where the count can be bounded
+    // by the actual payload size.
     Verify(reader.next() == 0x10001);
-    mesh.vertices.resize(reader.readInteger());
-    mesh.indices .resize(reader.readInteger() * 3);
+    const unsigned long vertexCount = reader.readInteger();
+    const unsigned long faceCount   = reader.readInteger();
 
     // Read vertex format
     Verify(reader.next() == 0x10002);
@@ -109,6 +119,12 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
     Verify(type == 0x10007 || type == 0x10005);
     if (type == 0x10007)
     {
+        // The payload must hold exactly the declared vertices. Bounding the
+        // count by the chunk size before allocating prevents both a huge
+        // allocation and the count*sizeof overflow in Buffer::reserve (which
+        // has no overflow check) that would under-allocate (CWE-787).
+        Verify(vertexCount <= reader.size() / sizeof(MASTER_VERTEX));
+        mesh.vertices.resize(vertexCount);
         reader.read(mesh.vertices, mesh.vertices.size() * sizeof(MASTER_VERTEX));
     }
     else
@@ -127,8 +143,11 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
         };
         #pragma pack()
 
+        Verify(vertexCount <= reader.size() / sizeof(OldVertex));
+        mesh.vertices.resize(vertexCount);
+
         // Read and convert old format
-        Buffer<OldVertex> vertices(mesh.vertices.size());
+        Buffer<OldVertex> vertices(vertexCount);
         reader.read(vertices, vertices.size() * sizeof(OldVertex));
         for (size_t i = 0; i < vertices.size(); i++)
         {
@@ -147,6 +166,10 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
     }
 
     Verify(reader.next() == 0x10004);
+    // Each face is three uint16_t indices. Bound the face count by the index
+    // chunk size before the *3 (which can overflow 32-bit) and the allocation.
+    Verify(faceCount <= reader.size() / (3 * sizeof(uint16_t)));
+    mesh.indices.resize(faceCount * 3);
     reader.read(mesh.indices, mesh.indices.size() * sizeof(uint16_t));
 
     // Read skin mapping
@@ -182,7 +205,12 @@ Model::Mesh* Model::ReadMesh(ChunkReader& reader)
     
     // Read mesh info
     Verify(reader.next() == 0x402);
-    mesh->subMeshes.resize( reader.readInteger() );
+    // Each sub-mesh is its own chunk, so the count can't exceed the bytes left
+    // in the file. Bound it before resizing (SubMesh is a large struct, so an
+    // unbounded count is a huge-allocation DoS).
+    const unsigned long subMeshCount = reader.readInteger();
+    Verify(subMeshCount <= reader.bytesLeft());
+    mesh->subMeshes.resize( subMeshCount );
     mesh->bounds.min   = reader.readVector3();
     mesh->bounds.max   = reader.readVector3();
     reader.readInteger();
@@ -283,12 +311,18 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         Verify(reader.nextMini() ==  2); unsigned long object = reader.readInteger();
         Verify(reader.nextMini() ==  3); unsigned long bone   = reader.readInteger();
         Verify(reader.nextMini() == -1);
-        
-        // Connect the object to the bone
+
+        // Connect the object to the bone. Both indices come from the file;
+        // bound them before indexing.
+        Verify(object < objects.size());
+        Verify(bone   < m_bones.size());
         objects[object]->bone = &m_bones[bone];
     }
 
-    // Read proxies
+    // Read proxies. Each proxy/dazzle is its own chunk, so bound the counts by
+    // the bytes left in the file before resizing (same huge-allocation guard as
+    // the bone/sub-mesh counts).
+    Verify(nProxies <= reader.bytesLeft());
     m_proxies.resize(nProxies);
     for (unsigned long i = 0; i < nProxies; i++)
     {
@@ -298,7 +332,9 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
 
         Verify(reader.next() == 0x603);
         Verify(reader.nextMini() ==  5); proxy.name = reader.readString();
-        Verify(reader.nextMini() ==  6); proxy.bone = &m_bones[reader.readInteger()];
+        Verify(reader.nextMini() ==  6); unsigned long proxyBone = reader.readInteger();
+        Verify(proxyBone < m_bones.size());
+        proxy.bone = &m_bones[proxyBone];
         ChunkType type = reader.nextMini();
         if (type == 7)
         {
@@ -329,13 +365,16 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         Verify(type == -1);
     }
 
+    Verify(nDazzles <= reader.bytesLeft());
     m_dazzles.resize(nDazzles);
     for (unsigned long i = 0; i < nDazzles; i++)
     {
         Verify(reader.next() == 0x604);
         Dazzle& dazzle = m_dazzles[i];
 
-        dazzle.bone = &m_bones[ReadDazzle(reader, dazzle)];
+        unsigned long dazzleBone = ReadDazzle(reader, dazzle);
+        Verify(dazzleBone < m_bones.size());
+        dazzle.bone = &m_bones[dazzleBone];
     }
 
     Verify(reader.next() == -1);

@@ -21,7 +21,13 @@ struct MINICHUNKHDR
 
 ChunkType ChunkReader::nextMini()
 {
-	assert(m_curDepth >= 0);
+	if (m_curDepth < 0)
+	{
+		// The root chunk has already been popped; refuse rather than indexing
+		// m_offsets[-1] (OOB read on a crafted/corrupt .alo). The asserts that
+		// used to "guard" this are compiled out in release builds.
+		throw BadFileException();
+	}
 	assert(m_size >= 0);
 
 	if (m_miniSize >= 0)
@@ -47,6 +53,16 @@ ChunkType ChunkReader::nextMini()
 
 	m_miniSize   = letohl(hdr.size);
 	m_miniOffset = m_file->tell() + m_miniSize;
+	// The mini-chunk size is a single byte, but nothing constrains it to the
+	// bytes actually remaining in the enclosing chunk. A corrupt/crafted .alo
+	// can declare a mini-chunk that runs past its parent's end, after which a
+	// later read()/skip() would over-read adjacent data. Bound the mini-chunk
+	// by its parent and reject the file. (This is the read-path analogue of
+	// max2alamo's writer-side size-byte guard.)
+	if (m_miniOffset > m_offsets[m_curDepth])
+	{
+		throw BadFileException();
+	}
 	m_position   = 0;
 
 	return letohl(hdr.type);
@@ -54,7 +70,14 @@ ChunkType ChunkReader::nextMini()
 
 ChunkType ChunkReader::next()
 {
-	assert(m_curDepth >= 0);
+	if (m_curDepth < 0)
+	{
+		// The root chunk has already been popped; a well-formed stream never
+		// calls next() again here. Refuse rather than indexing m_offsets[-1]
+		// (OOB read on a crafted/corrupt .alo). The asserts that used to
+		// "guard" this are compiled out in release builds.
+		throw BadFileException();
+	}
 
 	if (m_size >= 0)
 	{
@@ -78,7 +101,29 @@ ChunkType ChunkReader::next()
 	}
 
 	unsigned long size = letohl(hdr.size);
-	m_offsets[ ++m_curDepth ] = m_file->tell() + (size & 0x7FFFFFFF);
+	// Guard the fixed m_offsets[MAX_CHUNK_DEPTH] array: a crafted .alo with
+	// chunks nested past depth 255 would otherwise write out of bounds via
+	// the pre-increment below (CWE-787 memory corruption during parse).
+	// Reject the file. (nextMini() uses the flat m_miniOffset and is not
+	// affected.)
+	if (m_curDepth + 1 >= MAX_CHUNK_DEPTH)
+	{
+		throw BadFileException();
+	}
+	// Bound the chunk's payload by the enclosing chunk's end. m_offsets[0] is
+	// the file size and every nested end is validated here against its parent,
+	// so this transitively keeps all offsets inside the file. Without it a
+	// crafted size runs m_offsets[] past EOF (later seeks/reads over-read
+	// adjacent data) and can even wrap the signed long negative. The remaining
+	// span is computed in unsigned arithmetic to avoid overflow in here+payload.
+	unsigned long payload   = size & 0x7FFFFFFF;
+	unsigned long here      = m_file->tell();
+	unsigned long parentEnd = (unsigned long)m_offsets[m_curDepth];
+	if (here > parentEnd || payload > parentEnd - here)
+	{
+		throw BadFileException();
+	}
+	m_offsets[ ++m_curDepth ] = (long)(here + payload);
 	m_size     = (~size & 0x80000000) ? size : -1;
 	m_miniSize = -1;
 	m_position = 0;
@@ -94,6 +139,11 @@ void ChunkReader::skip()
 	}
 	else
 	{
+		if (m_curDepth < 0)
+		{
+			// Don't index m_offsets[-1] on a crafted/corrupt .alo.
+			throw BadFileException();
+		}
 		m_file->seek(m_offsets[m_curDepth--]);
         m_size     = -1;
         m_position =  0;
@@ -103,6 +153,15 @@ void ChunkReader::skip()
 size_t ChunkReader::size()
 {
 	return (m_miniSize >= 0) ? m_miniSize : m_size;
+}
+
+size_t ChunkReader::bytesLeft() const
+{
+	// m_offsets[0] is the file size (set in the constructor) and m_file->tell()
+	// is the absolute cursor; both are validated to stay within the file.
+	unsigned long pos = m_file->tell();
+	unsigned long end = (unsigned long)m_offsets[0];
+	return (pos < end) ? (size_t)(end - pos) : 0;
 }
 
 string ChunkReader::readString()
@@ -118,14 +177,30 @@ string ChunkReader::readString()
 	const char* s = (const char*)data;
 	size_t len = (n > 0) ? (size_t)n : 0;
 	while (len > 0 && s[len - 1] == '\0') --len;
-	return string(s, len);
+	// A zero-length payload leaves `data` empty (s == NULL); constructing
+	// string(NULL, 0) is technically UB, so return an empty string directly.
+	return (len > 0) ? string(s, len) : string();
 }
 
 wstring ChunkReader::readWideString()
 {
-	Buffer<wchar_t> data(size() / sizeof(wchar_t));
-	read(data, size());
-	return (wchar_t*)data;
+	long n = size();
+	size_t bytes = (n > 0) ? (size_t)n : 0;
+	// Allocate enough wchar_t elements to hold all `bytes` payload bytes, even
+	// when the length isn't a whole multiple of sizeof(wchar_t). Reading into a
+	// floor(bytes/sizeof) buffer would over-write by up to sizeof(wchar_t)-1
+	// bytes on a malformed odd-length payload (CWE-787).
+	Buffer<wchar_t> data((bytes + sizeof(wchar_t) - 1) / sizeof(wchar_t));
+	read(data, n);
+	// Only whole wchar_t characters are meaningful. Do NOT build the string by
+	// scanning for a NUL: length-exact payloads with no trailing terminator
+	// would make the wstring ctor over-read past the buffer. Bound by the
+	// payload length and trim trailing NUL(s), mirroring readString().
+	const wchar_t* s = (const wchar_t*)data;
+	size_t len = bytes / sizeof(wchar_t);
+	while (len > 0 && s[len - 1] == L'\0') --len;
+	// Avoid wstring(NULL, 0) (technically UB) for an empty payload.
+	return (len > 0) ? wstring(s, len) : wstring();
 }
 
 
@@ -208,13 +283,22 @@ size_t ChunkReader::read(void* buffer, size_t size, bool check)
 {
 	if (m_size >= 0)
 	{
-		size_t s = m_file->read(buffer, min(m_position + (long)size, (long)this->size()) - m_position);
+		// Clamp the request to the bytes remaining in the current (mini-)chunk
+		// using unsigned arithmetic. The old signed expression
+		// min(m_position + (long)size, (long)this->size()) - m_position could
+		// overflow negative for a large `size` and then convert to a huge
+		// size_t read count. Return the actual bytes read, not the request.
+		size_t total = this->size();
+		size_t pos   = (m_position > 0) ? (size_t)m_position : 0;
+		size_t avail = (pos < total) ? (total - pos) : 0;
+		size_t want  = (size < avail) ? size : avail;
+		size_t s = m_file->read(buffer, want);
 		m_position += (long)s;
 		if (check && s != size)
 		{
 			throw ReadException();
 		}
-		return size;
+		return s;
 	}
 	throw ReadException();
 }
@@ -284,8 +368,13 @@ void ChunkWriter::endChunk()
 		long pos  = m_file->tell();
 		long size = pos - (m_chunks[m_curDepth].offset + sizeof(CHUNKHDR));
 
-		CHUNKHDR hdr = { htolel(m_chunks[m_curDepth].hdr.type), htolel(m_chunks[m_curDepth].hdr.size) };
+		// Store the real payload length (preserving the container bit) BEFORE
+		// building the header to back-patch. Building hdr from the old hdr.size
+		// first wrote a stale size -- container-bit-only for parents, 0 for
+		// leaves -- producing structurally invalid output. (The mini-chunk
+		// branch above already updates then builds, in the correct order.)
 		m_chunks[m_curDepth].hdr.size = (m_chunks[m_curDepth].hdr.size & 0x80000000) | (size & ~0x80000000);
+		CHUNKHDR hdr = { htolel(m_chunks[m_curDepth].hdr.type), htolel(m_chunks[m_curDepth].hdr.size) };
 		m_file->seek(m_chunks[m_curDepth].offset);
 		m_file->write(&hdr, sizeof(CHUNKHDR));
 		m_file->seek(pos);

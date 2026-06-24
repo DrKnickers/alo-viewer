@@ -40,6 +40,11 @@ public:
 	ChunkType   nextMini();
 	void        skip();
 	size_t      size();
+	// Reads up to `size` bytes, clamped to the bytes remaining in the current
+	// (mini-)chunk. Returns the number of bytes ACTUALLY read (<= size). With
+	// check=true (the default) a short read throws ReadException, so callers
+	// that keep the default never observe a partial return; a check=false
+	// caller must inspect the return value rather than assume `size` bytes.
 	size_t      read(void* buffer, size_t size, bool check = true);
     size_t      tell() { return m_position; }
     bool        group() const { return m_size < 0; }

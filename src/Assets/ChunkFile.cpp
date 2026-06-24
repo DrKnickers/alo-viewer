@@ -177,7 +177,9 @@ string ChunkReader::readString()
 	const char* s = (const char*)data;
 	size_t len = (n > 0) ? (size_t)n : 0;
 	while (len > 0 && s[len - 1] == '\0') --len;
-	return string(s, len);
+	// A zero-length payload leaves `data` empty (s == NULL); constructing
+	// string(NULL, 0) is technically UB, so return an empty string directly.
+	return (len > 0) ? string(s, len) : string();
 }
 
 wstring ChunkReader::readWideString()
@@ -197,7 +199,8 @@ wstring ChunkReader::readWideString()
 	const wchar_t* s = (const wchar_t*)data;
 	size_t len = bytes / sizeof(wchar_t);
 	while (len > 0 && s[len - 1] == L'\0') --len;
-	return wstring(s, len);
+	// Avoid wstring(NULL, 0) (technically UB) for an empty payload.
+	return (len > 0) ? wstring(s, len) : wstring();
 }
 
 

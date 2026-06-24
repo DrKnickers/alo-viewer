@@ -117,7 +117,12 @@ unsigned long SubFile::skip(long count)
 size_t SubFile::read(void* buffer, size_t size)
 {
 	m_file->seek(m_start + m_offset);
-    size = min(size, m_size - m_offset);
+	// Clamp to the bytes remaining in this sub-file. m_size and m_offset are
+	// unsigned, so the old `m_size - m_offset` underflowed to a ~4GB value when
+	// the cursor had been seeked past the end (SubFile::seek is unbounded),
+	// over-reading into the adjacent parent-file bytes.
+	size_t avail = (m_offset < m_size) ? (size_t)(m_size - m_offset) : 0;
+	size = (size < avail) ? size : avail;
 	size_t read = m_file->read(buffer, size);
 	m_offset += (unsigned long)read;
 	return read;

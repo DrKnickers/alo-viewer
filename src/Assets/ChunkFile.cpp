@@ -21,7 +21,13 @@ struct MINICHUNKHDR
 
 ChunkType ChunkReader::nextMini()
 {
-	assert(m_curDepth >= 0);
+	if (m_curDepth < 0)
+	{
+		// The root chunk has already been popped; refuse rather than indexing
+		// m_offsets[-1] (OOB read on a crafted/corrupt .alo). The asserts that
+		// used to "guard" this are compiled out in release builds.
+		throw BadFileException();
+	}
 	assert(m_size >= 0);
 
 	if (m_miniSize >= 0)
@@ -64,7 +70,14 @@ ChunkType ChunkReader::nextMini()
 
 ChunkType ChunkReader::next()
 {
-	assert(m_curDepth >= 0);
+	if (m_curDepth < 0)
+	{
+		// The root chunk has already been popped; a well-formed stream never
+		// calls next() again here. Refuse rather than indexing m_offsets[-1]
+		// (OOB read on a crafted/corrupt .alo). The asserts that used to
+		// "guard" this are compiled out in release builds.
+		throw BadFileException();
+	}
 
 	if (m_size >= 0)
 	{
@@ -97,7 +110,20 @@ ChunkType ChunkReader::next()
 	{
 		throw BadFileException();
 	}
-	m_offsets[ ++m_curDepth ] = m_file->tell() + (size & 0x7FFFFFFF);
+	// Bound the chunk's payload by the enclosing chunk's end. m_offsets[0] is
+	// the file size and every nested end is validated here against its parent,
+	// so this transitively keeps all offsets inside the file. Without it a
+	// crafted size runs m_offsets[] past EOF (later seeks/reads over-read
+	// adjacent data) and can even wrap the signed long negative. The remaining
+	// span is computed in unsigned arithmetic to avoid overflow in here+payload.
+	unsigned long payload   = size & 0x7FFFFFFF;
+	unsigned long here      = m_file->tell();
+	unsigned long parentEnd = (unsigned long)m_offsets[m_curDepth];
+	if (here > parentEnd || payload > parentEnd - here)
+	{
+		throw BadFileException();
+	}
+	m_offsets[ ++m_curDepth ] = (long)(here + payload);
 	m_size     = (~size & 0x80000000) ? size : -1;
 	m_miniSize = -1;
 	m_position = 0;
@@ -113,6 +139,11 @@ void ChunkReader::skip()
 	}
 	else
 	{
+		if (m_curDepth < 0)
+		{
+			// Don't index m_offsets[-1] on a crafted/corrupt .alo.
+			throw BadFileException();
+		}
 		m_file->seek(m_offsets[m_curDepth--]);
         m_size     = -1;
         m_position =  0;
@@ -240,13 +271,22 @@ size_t ChunkReader::read(void* buffer, size_t size, bool check)
 {
 	if (m_size >= 0)
 	{
-		size_t s = m_file->read(buffer, min(m_position + (long)size, (long)this->size()) - m_position);
+		// Clamp the request to the bytes remaining in the current (mini-)chunk
+		// using unsigned arithmetic. The old signed expression
+		// min(m_position + (long)size, (long)this->size()) - m_position could
+		// overflow negative for a large `size` and then convert to a huge
+		// size_t read count. Return the actual bytes read, not the request.
+		size_t total = this->size();
+		size_t pos   = (m_position > 0) ? (size_t)m_position : 0;
+		size_t avail = (pos < total) ? (total - pos) : 0;
+		size_t want  = (size < avail) ? size : avail;
+		size_t s = m_file->read(buffer, want);
 		m_position += (long)s;
 		if (check && s != size)
 		{
 			throw ReadException();
 		}
-		return size;
+		return s;
 	}
 	throw ReadException();
 }

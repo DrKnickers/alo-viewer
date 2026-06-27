@@ -52,6 +52,7 @@ static INT_PTR CALLBACK SettingsDialogProc(HWND hWnd, UINT uMsg, WPARAM wParam, 
             settings->options.showGround    = false;
             settings->options.groundLevel   = 0.0f;
             settings->options.showWireframe = false;
+            settings->options.showOverlays  = true;
 
             // Initialize dialog elements
             SPINNER_INFO si;

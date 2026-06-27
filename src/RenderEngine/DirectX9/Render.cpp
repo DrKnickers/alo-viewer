@@ -688,9 +688,12 @@ void RenderEngine::Render(const RenderOptions& options)
     //
     // Render UI overlays
     //
-    RenderOverlays(options.showBones);
+    if (options.showOverlays)
+    {
+        RenderOverlays(options.showBones);
+    }
 
-    if (options.showBones && options.showBoneNames && m_uiFont != NULL)
+    if (options.showOverlays && options.showBones && options.showBoneNames && m_uiFont != NULL)
     {
         // Render bone names
         RenderBoneNames();

@@ -36,9 +36,12 @@ can establish.
 ```
 AloViewer.exe <model.alo> --capture <out.png>
               [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-distance <units>]
+              [--no-overlays]
 ```
 
 - Renders one settled frame of `<model.alo>` to `<out.png>` (PNG), then exits.
+- `--no-overlays` suppresses viewer overlays during capture, useful for clean
+  texture/material comparison stills.
 - **Exit code:** `0` on success, `1` if the capture could not be written
   (so a script can detect failure).
 
@@ -83,6 +86,18 @@ Textures and shaders resolve from the active game/mod base directory (the
 EaW/FoC `DATA` tree the loaded model belongs to). Run against a real install or
 an extracted `DATA` directory so the model's textures are found (otherwise the
 `tex-gate` lines report `loaded=0`).
+
+For local staged captures, launch from the stage root and pass the model path
+relative to that root, for example:
+
+```
+cd C:\path\to\stage-root
+AloViewer.exe Data\Art\Models\MODEL.ALO --capture out.png --no-overlays
+```
+
+Launching from an unrelated working directory can make the viewer miss the
+staged `Data\Art\Textures` tree and render the placeholder material even when
+the DDS exists in the stage.
 
 ### Known limitations
 

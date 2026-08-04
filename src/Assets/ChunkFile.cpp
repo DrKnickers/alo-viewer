@@ -47,6 +47,16 @@ ChunkType ChunkReader::nextMini()
 
 	m_miniSize   = letohl(hdr.size);
 	m_miniOffset = m_file->tell() + m_miniSize;
+	// The mini-chunk size is a single byte, but nothing constrains it to the
+	// bytes actually remaining in the enclosing chunk. A corrupt/crafted .alo
+	// can declare a mini-chunk that runs past its parent's end, after which a
+	// later read()/skip() would over-read adjacent data. Bound the mini-chunk
+	// by its parent and reject the file. (This is the read-path analogue of
+	// max2alamo's writer-side size-byte guard.)
+	if (m_miniOffset > m_offsets[m_curDepth])
+	{
+		throw BadFileException();
+	}
 	m_position   = 0;
 
 	return letohl(hdr.type);
@@ -78,6 +88,15 @@ ChunkType ChunkReader::next()
 	}
 
 	unsigned long size = letohl(hdr.size);
+	// Guard the fixed m_offsets[MAX_CHUNK_DEPTH] array: a crafted .alo with
+	// chunks nested past depth 255 would otherwise write out of bounds via
+	// the pre-increment below (CWE-787 memory corruption during parse).
+	// Reject the file. (nextMini() uses the flat m_miniOffset and is not
+	// affected.)
+	if (m_curDepth + 1 >= MAX_CHUNK_DEPTH)
+	{
+		throw BadFileException();
+	}
 	m_offsets[ ++m_curDepth ] = m_file->tell() + (size & 0x7FFFFFFF);
 	m_size     = (~size & 0x80000000) ? size : -1;
 	m_miniSize = -1;

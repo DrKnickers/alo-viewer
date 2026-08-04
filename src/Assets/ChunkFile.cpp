@@ -365,8 +365,13 @@ void ChunkWriter::endChunk()
 		long pos  = m_file->tell();
 		long size = pos - (m_chunks[m_curDepth].offset + sizeof(CHUNKHDR));
 
-		CHUNKHDR hdr = { htolel(m_chunks[m_curDepth].hdr.type), htolel(m_chunks[m_curDepth].hdr.size) };
+		// Store the real payload length (preserving the container bit) BEFORE
+		// building the header to back-patch. Building hdr from the old hdr.size
+		// first wrote a stale size -- container-bit-only for parents, 0 for
+		// leaves -- producing structurally invalid output. (The mini-chunk
+		// branch above already updates then builds, in the correct order.)
 		m_chunks[m_curDepth].hdr.size = (m_chunks[m_curDepth].hdr.size & 0x80000000) | (size & ~0x80000000);
+		CHUNKHDR hdr = { htolel(m_chunks[m_curDepth].hdr.type), htolel(m_chunks[m_curDepth].hdr.size) };
 		m_file->seek(m_chunks[m_curDepth].offset);
 		m_file->write(&hdr, sizeof(CHUNKHDR));
 		m_file->seek(pos);

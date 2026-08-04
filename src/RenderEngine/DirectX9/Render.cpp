@@ -3,6 +3,7 @@
 #include "RenderEngine/DirectX9/LightFieldInstance.h"
 #include "General/GameTime.h"
 #include <d3dx9.h>
+#include <cstdio>
 using namespace std;
 
 namespace Alamo {
@@ -699,9 +700,11 @@ void RenderEngine::Render(const RenderOptions& options)
 
     if (!m_capturePath.empty())
     {
-        SaveBackbuffer(m_capturePath);
+        const bool ok = SaveBackbuffer(m_capturePath);
+        if (!ok)
+            fwprintf(stderr, L"AloViewer: --capture FAILED to write '%ls'\n", m_capturePath.c_str());
         m_capturePath.clear();
-        PostQuitMessage(0);   // headless --capture: frame saved, exit the app
+        PostQuitMessage(ok ? 0 : 1);   // headless --capture: 0 = saved, 1 = failed
     }
 
 	m_pDevice->Present(NULL, NULL, NULL, NULL);
@@ -709,16 +712,18 @@ void RenderEngine::Render(const RenderOptions& options)
 
 // Save the just-rendered backbuffer to a PNG. Resolves MSAA via a plain render
 // target, copies to system memory, then writes the file. Used by --capture.
-void RenderEngine::SaveBackbuffer(const std::wstring& path)
+// Returns true only if the PNG was actually written.
+bool RenderEngine::SaveBackbuffer(const std::wstring& path)
 {
     IDirect3DSurface9* pBack = NULL;
     if (FAILED(m_pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack)) || pBack == NULL)
-        return;
+        return false;
 
     D3DSURFACE_DESC desc;
     pBack->GetDesc(&desc);
 
     // Resolve (handles MSAA) into a plain render target, then copy to system memory.
+    bool ok = false;
     IDirect3DSurface9* pResolved = NULL;
     IDirect3DSurface9* pSysmem   = NULL;
     if (SUCCEEDED(m_pDevice->CreateRenderTarget(desc.Width, desc.Height, desc.Format,
@@ -728,12 +733,13 @@ void RenderEngine::SaveBackbuffer(const std::wstring& path)
             D3DPOOL_SYSTEMMEM, &pSysmem, NULL)) &&
         SUCCEEDED(m_pDevice->GetRenderTargetData(pResolved, pSysmem)))
     {
-        D3DXSaveSurfaceToFileW(path.c_str(), D3DXIFF_PNG, pSysmem, NULL, NULL);
+        ok = SUCCEEDED(D3DXSaveSurfaceToFileW(path.c_str(), D3DXIFF_PNG, pSysmem, NULL, NULL));
     }
 
     if (pSysmem)   pSysmem->Release();
     if (pResolved) pResolved->Release();
     pBack->Release();
+    return ok;
 }
 
 }

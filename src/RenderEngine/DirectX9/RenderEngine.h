@@ -19,6 +19,13 @@ class ParticleSystemInstance;
 class ParticleEmitterInstance;
 class LightFieldInstance;
 
+enum TextureExpectedKind
+{
+    TEXTURE_EXPECT_ANY,
+    TEXTURE_EXPECT_2D,
+    TEXTURE_EXPECT_CUBE,
+};
+
 class ProxyInstance : public IObject, public LinkedListObject<ProxyInstance>
 {
 public:
@@ -197,7 +204,10 @@ public:
     ptr<Effect>          LoadEffect(const std::string& name, FxType type = FX_NORMAL);
     ptr<Effect>          LoadShadowMapEffect(const std::string& vertexType);
     ptr<Effect>          LoadShadowDebugEffect(bool rskin);
-    ptr<Texture>         LoadTexture(const std::string& name, bool usePlaceholder = true);
+    ptr<Texture>         LoadTexture(
+        const std::string& name,
+        bool usePlaceholder = true,
+        TextureExpectedKind expectedKind = TEXTURE_EXPECT_ANY);
     ptr<IObjectTemplate> CreateObjectTemplate(ptr<Model> model);
     ptr<IRenderObject>   CreateRenderObject(ptr<IObjectTemplate> templ, int alt, int lod);
 

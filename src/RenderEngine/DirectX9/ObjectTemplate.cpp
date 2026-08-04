@@ -102,7 +102,16 @@ bool ObjectTemplate::SubMesh::Render(const RenderObject& object, bool special) c
             const Parameter& p = m_parameters[i];
             switch (p.m_parameter->m_type)
             {
-                case SPT_TEXTURE: pEffect->SetTexture   (p.m_handle, p.m_texture->GetTexture()); break;
+                case SPT_TEXTURE: {
+                    IDirect3DBaseTexture9* texture = p.m_texture ? p.m_texture->GetTexture() : NULL;
+                    HRESULT hr = pEffect->SetTexture(p.m_handle, texture);
+                    fwprintf(stderr, L"[tex-bind] param=%hs handle=%d type=%hs hr=0x%08X\n",
+                             p.m_parameter->m_name.c_str(),
+                             p.m_handle != NULL ? 1 : 0,
+                             texture != NULL ? (texture->GetType() == D3DRTYPE_CUBETEXTURE ? "cube" : "2d") : "null",
+                             (unsigned)hr);
+                    break;
+                }
                 case SPT_INT:     pEffect->SetInt       (p.m_handle, p.m_parameter->m_int); break;
                 case SPT_FLOAT:   pEffect->SetFloat     (p.m_handle, p.m_parameter->m_float); break;
                 case SPT_FLOAT3:  pEffect->SetFloatArray(p.m_handle, &p.m_parameter->m_float3.x, 3); break;
@@ -485,13 +494,22 @@ ObjectTemplate::ObjectTemplate(ptr<Model> model, RenderEngine& engine, VertexMan
                 if (srcmesh.parameters[k].m_type == SPT_TEXTURE)
                 {
                     // Load texture
-                    submesh.m_parameters[k].m_texture = m_engine.LoadTexture(srcmesh.parameters[k].m_texture);
+                    const bool expectCube = _stricmp(srcmesh.parameters[k].m_name.c_str(), "SkyCubeTexture") == 0;
+                    submesh.m_parameters[k].m_texture = m_engine.LoadTexture(
+                        srcmesh.parameters[k].m_texture,
+                        true,
+                        expectCube ? TEXTURE_EXPECT_CUBE : TEXTURE_EXPECT_ANY);
                     {
                         ptr<Texture> t = submesh.m_parameters[k].m_texture;
                         bool ok = (t != NULL) && (t->GetTexture() != NULL);
-                        fwprintf(stderr, L"[tex-gate] param=%hs file=%hs loaded=%d\n",
+                        fwprintf(stderr, L"[tex-gate] param=%hs file=%hs handle=%d type=%hs loaded=%d\n",
                                  srcmesh.parameters[k].m_name.c_str(),
-                                 srcmesh.parameters[k].m_texture.c_str(), ok ? 1 : 0);
+                                 srcmesh.parameters[k].m_texture.c_str(),
+                                 submesh.m_parameters[k].m_handle != NULL ? 1 : 0,
+                                 (t != NULL && t->GetTexture() != NULL)
+                                     ? (t->GetType() == D3DRTYPE_CUBETEXTURE ? "cube" : "2d")
+                                     : "null",
+                                 ok ? 1 : 0);
                     }
                 }
             }

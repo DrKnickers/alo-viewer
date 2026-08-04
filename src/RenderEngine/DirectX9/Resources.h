@@ -13,18 +13,31 @@ namespace DirectX9 {
 // A wrapper for textures
 class Texture : public IObject
 {
-	IDirect3DTexture9* m_pTexture;
+	IDirect3DBaseTexture9* m_pTexture;
 
 	~Texture()
     {
         m_pTexture->Release();
     }
 public:
-    IDirect3DTexture9* operator->() const { assert(m_pTexture != NULL); return m_pTexture; }
-    operator IDirect3DTexture9*() const   { return m_pTexture; }
-    IDirect3DTexture9* GetTexture() const  { return m_pTexture; }
+    IDirect3DBaseTexture9* operator->() const { assert(m_pTexture != NULL); return m_pTexture; }
+    operator IDirect3DBaseTexture9*() const   { return m_pTexture; }
+    IDirect3DBaseTexture9* GetTexture() const { return m_pTexture; }
+    D3DRESOURCETYPE GetType() const           { return m_pTexture->GetType(); }
+
+    IDirect3DTexture9* GetTexture2D() const
+    {
+        if (m_pTexture == NULL || m_pTexture->GetType() != D3DRTYPE_TEXTURE) return NULL;
+        return static_cast<IDirect3DTexture9*>(m_pTexture);
+    }
+
+    IDirect3DCubeTexture9* GetCubeTexture() const
+    {
+        if (m_pTexture == NULL || m_pTexture->GetType() != D3DRTYPE_CUBETEXTURE) return NULL;
+        return static_cast<IDirect3DCubeTexture9*>(m_pTexture);
+    }
 	
-    Texture(IDirect3DTexture9* pTexture)
+    Texture(IDirect3DBaseTexture9* pTexture)
     {
         m_pTexture = pTexture;
     }

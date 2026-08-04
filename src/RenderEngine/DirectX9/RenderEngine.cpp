@@ -4,10 +4,44 @@
 #include "General/Log.h"
 #include "General/Utils.h"
 #include "resource.h"
+#include <cstring>
 using namespace std;
 
 namespace Alamo {
 namespace DirectX9 {
+
+namespace {
+
+const DWORD kDdsCaps2Cubemap = 0x00000200;
+const DWORD kDdsCaps2CubemapAllFaces =
+    0x00000400 | 0x00000800 |
+    0x00001000 | 0x00002000 |
+    0x00004000 | 0x00008000;
+
+bool IsDdsCubemap(const Buffer<char>& data)
+{
+    if (data.size() < 128) return false;
+    if (std::memcmp(data, "DDS ", 4) != 0) return false;
+    DWORD headerSize = 0;
+    std::memcpy(&headerSize, data + 4, sizeof(headerSize));
+    if (headerSize != 124) return false;
+    DWORD caps2 = 0;
+    std::memcpy(&caps2, data + 112, sizeof(caps2));
+    return (caps2 & kDdsCaps2Cubemap) != 0 &&
+           (caps2 & kDdsCaps2CubemapAllFaces) == kDdsCaps2CubemapAllFaces;
+}
+
+const char* TextureTypeName(IDirect3DBaseTexture9* texture)
+{
+    if (texture == NULL) return "null";
+    switch (texture->GetType()) {
+        case D3DRTYPE_TEXTURE: return "2d";
+        case D3DRTYPE_CUBETEXTURE: return "cube";
+        default: return "other";
+    }
+}
+
+}  // namespace
 
 // Width and height of the ground plane
 static const float GROUND_SIZE    = 2000.0f;
@@ -1064,17 +1098,37 @@ ptr<PhaseEffect> RenderEngine::LoadPhaseEffect(const std::string& name)
     return new PhaseEffect(&m_effects, LoadShader(name));
 }
 
-ptr<Texture> RenderEngine::LoadTexture(const std::string& name, bool usePlaceholder)
+ptr<Texture> RenderEngine::LoadTexture(
+    const std::string& name,
+    bool usePlaceholder,
+    TextureExpectedKind expectedKind)
 {
+    bool expectedCube = expectedKind == TEXTURE_EXPECT_CUBE;
     string key = Uppercase(name);
+    if (expectedKind == TEXTURE_EXPECT_CUBE) {
+        key = "CUBE:" + key;
+    } else if (expectedKind == TEXTURE_EXPECT_2D) {
+        key = "2D:" + key;
+    } else {
+        key = "ANY:" + key;
+    }
     TextureMap::iterator p = m_textureCache.find(key);
     if (p != m_textureCache.end())
     {
+        if (expectedCube && (p->second == NULL || p->second->GetType() != D3DRTYPE_CUBETEXTURE)) {
+            fwprintf(stderr, L"[tex-load] cache-reject file=%hs expected=cube cachedType=%hs\n",
+                     name.c_str(),
+                     p->second != NULL && p->second->GetTexture() != NULL
+                         ? TextureTypeName(p->second->GetTexture())
+                         : "null");
+            return NULL;
+        }
         return p->second;
     }
 
     // Texture wasn't loaded before, load it
-    IDirect3DTexture9* pD3DTexture = NULL;
+    IDirect3DBaseTexture9* pD3DTexture = NULL;
+    bool fileLooksCube = false;
 
     // Read the file
     ptr<IFile> file = Assets::LoadTexture(name);
@@ -1084,10 +1138,26 @@ ptr<Texture> RenderEngine::LoadTexture(const std::string& name, bool usePlacehol
         file->read(data, file->size());
         
         // Create the texture
+        fileLooksCube = IsDdsCubemap(data);
         HRESULT hRes;
-        if (FAILED(hRes = D3DXCreateTextureFromFileInMemory(m_pDevice, data, (UINT)data.size(), &pD3DTexture)))
-        {
-            Log::WriteError("Unable to load texture \"%s\": %ls.\n", name.c_str(), DXGetErrorDescription(hRes));
+        if (expectedCube || fileLooksCube) {
+            IDirect3DCubeTexture9* cube = NULL;
+            hRes = D3DXCreateCubeTextureFromFileInMemory(
+                m_pDevice, data, (UINT)data.size(), &cube);
+            if (SUCCEEDED(hRes)) {
+                pD3DTexture = cube;
+            } else {
+                Log::WriteError("Unable to load cube texture \"%s\": %ls.\n", name.c_str(), DXGetErrorDescription(hRes));
+            }
+        } else {
+            IDirect3DTexture9* tex2d = NULL;
+            hRes = D3DXCreateTextureFromFileInMemory(
+                m_pDevice, data, (UINT)data.size(), &tex2d);
+            if (SUCCEEDED(hRes)) {
+                pD3DTexture = tex2d;
+            } else {
+                Log::WriteError("Unable to load texture \"%s\": %ls.\n", name.c_str(), DXGetErrorDescription(hRes));
+            }
         }
     }
     else
@@ -1095,15 +1165,24 @@ ptr<Texture> RenderEngine::LoadTexture(const std::string& name, bool usePlacehol
         Log::WriteError("Texture \"%s\" not found.\n", name.c_str());
     }
     
-    if (pD3DTexture == NULL && usePlaceholder)
+    if (pD3DTexture == NULL && usePlaceholder && expectedKind != TEXTURE_EXPECT_CUBE)
     {
         // Load placeholder texture
+        IDirect3DTexture9* placeholder = NULL;
         HRESULT hRes;
-        if (FAILED(hRes = D3DXCreateTextureFromResource(m_pDevice, GetModuleHandle(NULL), MAKEINTRESOURCE(IDT_MISSING), &pD3DTexture)))
+        if (FAILED(hRes = D3DXCreateTextureFromResource(m_pDevice, GetModuleHandle(NULL), MAKEINTRESOURCE(IDT_MISSING), &placeholder)))
         {
             throw DirectXException(hRes);
         }
+        pD3DTexture = placeholder;
     }
+
+    fwprintf(stderr, L"[tex-load] file=%hs expected=%hs ddsCube=%d type=%hs loaded=%d\n",
+             name.c_str(),
+             expectedKind == TEXTURE_EXPECT_CUBE ? "cube" : expectedKind == TEXTURE_EXPECT_2D ? "2d" : "any",
+             fileLooksCube ? 1 : 0,
+             TextureTypeName(pD3DTexture),
+             pD3DTexture != NULL ? 1 : 0);
 
     if (pD3DTexture == NULL)
     {

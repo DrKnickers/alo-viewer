@@ -107,9 +107,18 @@ size_t ChunkReader::size()
 
 string ChunkReader::readString()
 {
-	Buffer<char> data(size() / sizeof(char));
-	read(data, size());
-	return (char*)data;
+	long n = size();
+	Buffer<char> data(n / sizeof(char));
+	read(data, n);
+	// The payload length is known (n). Do NOT build the string by scanning for a NUL:
+	// some writers (e.g. headless material editors like alo_material) emit length-exact
+	// strings with no trailing NUL, and `string((char*)data)` would then over-read past
+	// the buffer into adjacent memory (garbage trailing byte). Bound by n, and trim any
+	// trailing NUL(s) so vanilla NUL-terminated strings still come out clean.
+	const char* s = (const char*)data;
+	size_t len = (n > 0) ? (size_t)n : 0;
+	while (len > 0 && s[len - 1] == '\0') --len;
+	return string(s, len);
 }
 
 wstring ChunkReader::readWideString()

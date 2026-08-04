@@ -19,6 +19,9 @@ void Model::ReadBone(ChunkReader& reader, Bone& bone)
     Verify(type == 0x205 || type == 0x206);
 
     long parent = reader.readInteger();
+    // parent is a file-controlled index into m_bones (-1 means "no parent").
+    // Reject an out-of-range index instead of reading past the vector.
+    Verify(parent < 0 || (size_t)parent < m_bones.size());
     bone.parent    = (parent >= 0) ? &m_bones[parent] : NULL;
     bone.visible   = (reader.readInteger() != 0);
     bone.billboard = BBT_DISABLE;
@@ -303,8 +306,11 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         Verify(reader.nextMini() ==  2); unsigned long object = reader.readInteger();
         Verify(reader.nextMini() ==  3); unsigned long bone   = reader.readInteger();
         Verify(reader.nextMini() == -1);
-        
-        // Connect the object to the bone
+
+        // Connect the object to the bone. Both indices come from the file;
+        // bound them before indexing.
+        Verify(object < objects.size());
+        Verify(bone   < m_bones.size());
         objects[object]->bone = &m_bones[bone];
     }
 
@@ -318,7 +324,9 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
 
         Verify(reader.next() == 0x603);
         Verify(reader.nextMini() ==  5); proxy.name = reader.readString();
-        Verify(reader.nextMini() ==  6); proxy.bone = &m_bones[reader.readInteger()];
+        Verify(reader.nextMini() ==  6); unsigned long proxyBone = reader.readInteger();
+        Verify(proxyBone < m_bones.size());
+        proxy.bone = &m_bones[proxyBone];
         ChunkType type = reader.nextMini();
         if (type == 7)
         {
@@ -355,7 +363,9 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         Verify(reader.next() == 0x604);
         Dazzle& dazzle = m_dazzles[i];
 
-        dazzle.bone = &m_bones[ReadDazzle(reader, dazzle)];
+        unsigned long dazzleBone = ReadDazzle(reader, dazzle);
+        Verify(dazzleBone < m_bones.size());
+        dazzle.bone = &m_bones[dazzleBone];
     }
 
     Verify(reader.next() == -1);

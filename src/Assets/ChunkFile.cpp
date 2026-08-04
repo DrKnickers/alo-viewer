@@ -142,9 +142,22 @@ string ChunkReader::readString()
 
 wstring ChunkReader::readWideString()
 {
-	Buffer<wchar_t> data(size() / sizeof(wchar_t));
-	read(data, size());
-	return (wchar_t*)data;
+	long n = size();
+	size_t bytes = (n > 0) ? (size_t)n : 0;
+	// Allocate enough wchar_t elements to hold all `bytes` payload bytes, even
+	// when the length isn't a whole multiple of sizeof(wchar_t). Reading into a
+	// floor(bytes/sizeof) buffer would over-write by up to sizeof(wchar_t)-1
+	// bytes on a malformed odd-length payload (CWE-787).
+	Buffer<wchar_t> data((bytes + sizeof(wchar_t) - 1) / sizeof(wchar_t));
+	read(data, n);
+	// Only whole wchar_t characters are meaningful. Do NOT build the string by
+	// scanning for a NUL: length-exact payloads with no trailing terminator
+	// would make the wstring ctor over-read past the buffer. Bound by the
+	// payload length and trim trailing NUL(s), mirroring readString().
+	const wchar_t* s = (const wchar_t*)data;
+	size_t len = bytes / sizeof(wchar_t);
+	while (len > 0 && s[len - 1] == L'\0') --len;
+	return wstring(s, len);
 }
 
 

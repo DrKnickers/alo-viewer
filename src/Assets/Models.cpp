@@ -205,7 +205,12 @@ Model::Mesh* Model::ReadMesh(ChunkReader& reader)
     
     // Read mesh info
     Verify(reader.next() == 0x402);
-    mesh->subMeshes.resize( reader.readInteger() );
+    // Each sub-mesh is its own chunk, so the count can't exceed the bytes left
+    // in the file. Bound it before resizing (SubMesh is a large struct, so an
+    // unbounded count is a huge-allocation DoS).
+    const unsigned long subMeshCount = reader.readInteger();
+    Verify(subMeshCount <= reader.bytesLeft());
+    mesh->subMeshes.resize( subMeshCount );
     mesh->bounds.min   = reader.readVector3();
     mesh->bounds.max   = reader.readVector3();
     reader.readInteger();
@@ -314,7 +319,10 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         objects[object]->bone = &m_bones[bone];
     }
 
-    // Read proxies
+    // Read proxies. Each proxy/dazzle is its own chunk, so bound the counts by
+    // the bytes left in the file before resizing (same huge-allocation guard as
+    // the bone/sub-mesh counts).
+    Verify(nProxies <= reader.bytesLeft());
     m_proxies.resize(nProxies);
     for (unsigned long i = 0; i < nProxies; i++)
     {
@@ -357,6 +365,7 @@ void Model::ReadConnections(ChunkReader& reader, const std::vector<Attachable*>&
         Verify(type == -1);
     }
 
+    Verify(nDazzles <= reader.bytesLeft());
     m_dazzles.resize(nDazzles);
     for (unsigned long i = 0; i < nDazzles; i++)
     {

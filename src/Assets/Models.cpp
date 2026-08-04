@@ -48,7 +48,12 @@ void Model::ReadSkeleton(ChunkReader& reader)
 {
     Verify(reader.next() == 0x200);
     Verify(reader.next() == 0x201);
-    m_bones.resize(reader.readInteger());
+    const unsigned long boneCount = reader.readInteger();
+    // A model cannot contain more bones than there are bytes left in the file
+    // (each bone is its own chunk). Bound the count before resizing so a
+    // crafted .alo can't drive a huge allocation.
+    Verify(boneCount <= reader.bytesLeft());
+    m_bones.resize(boneCount);
     
     vector<size_t> siblings(m_bones.size(), -1);
     size_t rootSibling = -1;
@@ -96,10 +101,12 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
 
     Verify(reader.next() == 0x10000);
     
-    // Read vertex and primitive count
+    // Read vertex and primitive count. Defer the (attacker-controlled)
+    // allocations until the data chunks below, where the count can be bounded
+    // by the actual payload size.
     Verify(reader.next() == 0x10001);
-    mesh.vertices.resize(reader.readInteger());
-    mesh.indices .resize(reader.readInteger() * 3);
+    const unsigned long vertexCount = reader.readInteger();
+    const unsigned long faceCount   = reader.readInteger();
 
     // Read vertex format
     Verify(reader.next() == 0x10002);
@@ -109,6 +116,12 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
     Verify(type == 0x10007 || type == 0x10005);
     if (type == 0x10007)
     {
+        // The payload must hold exactly the declared vertices. Bounding the
+        // count by the chunk size before allocating prevents both a huge
+        // allocation and the count*sizeof overflow in Buffer::reserve (which
+        // has no overflow check) that would under-allocate (CWE-787).
+        Verify(vertexCount <= reader.size() / sizeof(MASTER_VERTEX));
+        mesh.vertices.resize(vertexCount);
         reader.read(mesh.vertices, mesh.vertices.size() * sizeof(MASTER_VERTEX));
     }
     else
@@ -127,8 +140,11 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
         };
         #pragma pack()
 
+        Verify(vertexCount <= reader.size() / sizeof(OldVertex));
+        mesh.vertices.resize(vertexCount);
+
         // Read and convert old format
-        Buffer<OldVertex> vertices(mesh.vertices.size());
+        Buffer<OldVertex> vertices(vertexCount);
         reader.read(vertices, vertices.size() * sizeof(OldVertex));
         for (size_t i = 0; i < vertices.size(); i++)
         {
@@ -147,6 +163,10 @@ void Model::ReadSubMesh(ChunkReader& reader, SubMesh& mesh)
     }
 
     Verify(reader.next() == 0x10004);
+    // Each face is three uint16_t indices. Bound the face count by the index
+    // chunk size before the *3 (which can overflow 32-bit) and the allocation.
+    Verify(faceCount <= reader.size() / (3 * sizeof(uint16_t)));
+    mesh.indices.resize(faceCount * 3);
     reader.read(mesh.indices, mesh.indices.size() * sizeof(uint16_t));
 
     // Read skin mapping

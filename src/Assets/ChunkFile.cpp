@@ -155,6 +155,15 @@ size_t ChunkReader::size()
 	return (m_miniSize >= 0) ? m_miniSize : m_size;
 }
 
+size_t ChunkReader::bytesLeft() const
+{
+	// m_offsets[0] is the file size (set in the constructor) and m_file->tell()
+	// is the absolute cursor; both are validated to stay within the file.
+	unsigned long pos = m_file->tell();
+	unsigned long end = (unsigned long)m_offsets[0];
+	return (pos < end) ? (size_t)(end - pos) : 0;
+}
+
 string ChunkReader::readString()
 {
 	long n = size();

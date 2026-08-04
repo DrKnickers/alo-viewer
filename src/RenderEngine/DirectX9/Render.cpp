@@ -700,11 +700,23 @@ void RenderEngine::Render(const RenderOptions& options)
 
     if (!m_capturePath.empty())
     {
-        const bool ok = SaveBackbuffer(m_capturePath);
-        if (!ok)
-            fwprintf(stderr, L"AloViewer: --capture FAILED to write '%ls'\n", m_capturePath.c_str());
-        m_capturePath.clear();
-        PostQuitMessage(ok ? 0 : 1);   // headless --capture: 0 = saved, 1 = failed
+        if (m_captureWarmup > 0)
+        {
+            // Let the scene settle before grabbing the headless frame: the first few
+            // frames are often underlit/incomplete while lighting, the environment and
+            // first-use shader compilation come up. Render (and Present) this frame
+            // normally and try again next frame. Without this the captured PNG is
+            // non-deterministic -- sometimes a correct frame, sometimes near-black.
+            m_captureWarmup--;
+        }
+        else
+        {
+            const bool ok = SaveBackbuffer(m_capturePath);
+            if (!ok)
+                fwprintf(stderr, L"AloViewer: --capture FAILED to write '%ls'\n", m_capturePath.c_str());
+            m_capturePath.clear();
+            PostQuitMessage(ok ? 0 : 1);   // headless --capture: 0 = saved, 1 = failed
+        }
     }
 
 	m_pDevice->Present(NULL, NULL, NULL, NULL);

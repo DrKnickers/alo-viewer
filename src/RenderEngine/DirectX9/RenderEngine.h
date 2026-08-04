@@ -155,7 +155,7 @@ private:
     void RenderOverlays(bool showBones) const;
     void RenderBoneNames() const;
     void RenderGround(float groundLevel, D3DCOLOR color);
-    void SaveBackbuffer(const std::wstring& path);
+    bool SaveBackbuffer(const std::wstring& path);
 
     void SetLegacyLights();
     void InitializeRenderStates();

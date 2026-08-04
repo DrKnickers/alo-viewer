@@ -1466,6 +1466,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
     _CrtSetDbgFlag( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 #endif
 
+    int exitCode = 0;
 #ifdef NDEBUG
     // Only catch exceptions in release mode.
     // In debug mode, the IDE will jump to the source.
@@ -1522,6 +1523,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
                 DispatchMessage(&msg);
             }
         }
+        exitCode = (int)msg.wParam;   // propagate the PostQuitMessage code (e.g. --capture failure)
 
         // Kill the update timer
         KillTimer(info.hMainWnd, 0);
@@ -1540,7 +1542,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
 #ifndef NDEBUG
 	FreeConsole();
-#endif 
+#endif
 
-    return 0;
+    return exitCode;
 }

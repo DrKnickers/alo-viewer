@@ -1479,11 +1479,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
         Initialize(&info);
 
         // Parse arguments: [model.alo] [--capture out.png]
+        //   [--camera-azimuth deg] [--camera-elevation deg] [--camera-distance units]
         wstring modelFile, capturePath;
+        bool  hasCam = false;
+        float camAzimuth = 0.0f, camElevation = 10.0f, camDistance = 7.5f;
         for (size_t i = 1; i < args.size(); i++)
         {
             if (args[i] == L"--capture" && i + 1 < args.size())
                 capturePath = args[++i];
+            else if (args[i] == L"--camera-azimuth" && i + 1 < args.size())
+                { camAzimuth = (float)_wtof(args[++i].c_str()); hasCam = true; }
+            else if (args[i] == L"--camera-elevation" && i + 1 < args.size())
+                { camElevation = (float)_wtof(args[++i].c_str()); hasCam = true; }
+            else if (args[i] == L"--camera-distance" && i + 1 < args.size())
+                { camDistance = (float)_wtof(args[++i].c_str()); hasCam = true; }
             else if (modelFile.empty())
                 modelFile = args[i];
         }
@@ -1495,12 +1504,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
         if (!capturePath.empty() && info.engine != NULL)
         {
-            // Frame the scene from the front, slightly above, looking at the origin,
-            // then request a one-shot headless capture (saved before present; quits).
+            // Frame the scene looking at the origin, then request a one-shot headless capture
+            // (saved before present; quits). With --camera-* flags, orbit the origin by azimuth
+            // (deg around +Z; 0 = front / -Y), elevation (deg above the XY plane) and distance
+            // (world units); otherwise keep the default front-slightly-above framing.
             Camera cam;
-            cam.m_position = Vector3(0.0f, -7.5f, 1.4f);
-            cam.m_target   = Vector3(0.0f,  0.0f, 0.0f);
-            cam.m_up       = Vector3(0.0f,  0.0f, 1.0f);
+            cam.m_target = Vector3(0.0f, 0.0f, 0.0f);
+            cam.m_up     = Vector3(0.0f, 0.0f, 1.0f);
+            if (hasCam)
+            {
+                const float DEG2RAD = 3.14159265358979f / 180.0f;
+                float az = camAzimuth * DEG2RAD, el = camElevation * DEG2RAD;
+                float h  = cosf(el);
+                cam.m_position = Vector3( camDistance * h * sinf(az),
+                                        -camDistance * h * cosf(az),
+                                         camDistance * sinf(el) );
+            }
+            else
+            {
+                cam.m_position = Vector3(0.0f, -7.5f, 1.4f);
+            }
             info.engine->SetCamera(cam);
             info.engine->RequestCapture(capturePath);
         }

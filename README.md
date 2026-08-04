@@ -98,3 +98,18 @@ The headless build is produced with the VS2022 BuildTools compiler; see
 [`build.bat`](build.bat) for the exact recipe (`msbuild AloViewer.sln`,
 `Release`/`x86`, borrowing the header-only `afxres.h` from an MFC-equipped
 toolset). The output is `Release/AloViewer.exe`.
+
+## Static analysis
+
+`cppcheck` runs over the parser/model sources with no build or compile database
+(`winget install Cppcheck.Cppcheck`):
+
+```bash
+cppcheck --enable=warning,style,performance,portability --std=c++17 \
+  --quiet --suppress=missingIncludeSystem --suppress=missingInclude \
+  -I src/Assets -I src src/Assets/ChunkFile.cpp src/Assets/Models.cpp
+```
+
+The `.alo` chunk reader was hardened against malformed input in #3 (depth
+ceiling, bounded reads, size/offset validation); run cppcheck before further
+parser changes to catch regressions early.

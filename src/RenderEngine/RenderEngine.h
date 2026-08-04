@@ -60,6 +60,7 @@ struct RenderOptions
     bool  showGround;
     float groundLevel;
     bool  showWireframe;
+    bool  showOverlays;
 };
 
 class IRenderEngine : public IObject

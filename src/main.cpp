@@ -13,12 +13,22 @@
 #include "Dialogs/Dialogs.h"
 #include "RenderWindow.h"
 #include "Console.h"
-#include <afxres.h>
+#include <windows.h>
 #include "config.h"
 #include <shlwapi.h>
 #include <commctrl.h>
 using namespace std;
 using namespace Alamo;
+
+#ifndef ID_EDIT_COPY
+#define ID_EDIT_COPY  0xE122
+#endif
+#ifndef ID_EDIT_CUT
+#define ID_EDIT_CUT   0xE123
+#endif
+#ifndef ID_EDIT_PASTE
+#define ID_EDIT_PASTE 0xE125
+#endif
 
 // Indices of items in the menu. Until the compiler properly supports C99,
 // don't use designators
@@ -1480,8 +1490,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
         // Parse arguments: [model.alo] [--capture out.png]
         //   [--camera-azimuth deg] [--camera-elevation deg] [--camera-distance units]
+        //   [--no-overlays]
         wstring modelFile, capturePath;
-        bool  hasCam = false, hasCamDistance = false;
+        bool  hasCam = false, hasCamDistance = false, suppressOverlays = false;
         float camAzimuth = 0.0f, camElevation = 10.0f, camDistance = 7.5f;
         for (size_t i = 1; i < args.size(); i++)
         {
@@ -1493,6 +1504,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
                 { camElevation = (float)_wtof(args[++i].c_str()); hasCam = true; }
             else if (args[i] == L"--camera-distance" && i + 1 < args.size())
                 { camDistance = (float)_wtof(args[++i].c_str()); hasCam = true; hasCamDistance = true; }
+            else if (args[i] == L"--no-overlays")
+                suppressOverlays = true;
             else if (modelFile.empty())
                 modelFile = args[i];
         }
@@ -1504,6 +1517,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
         if (!capturePath.empty() && info.engine != NULL)
         {
+            if (suppressOverlays && info.hSettings != NULL && info.hRenderWnd != NULL)
+            {
+                RenderOptions options = Dialogs::Settings_GetRenderOptions(info.hSettings);
+                options.showOverlays = false;
+                SetRenderWindowOptions(info.hRenderWnd, options);
+            }
+
             // Frame the model by its ACTUAL bounding box rather than the origin: look at
             // the box center and pull back far enough that the whole model fits the
             // vertical FOV. Model pivots usually sit at the base, so the geometry extends

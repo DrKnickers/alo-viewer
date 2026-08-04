@@ -1481,7 +1481,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
         // Parse arguments: [model.alo] [--capture out.png]
         //   [--camera-azimuth deg] [--camera-elevation deg] [--camera-distance units]
         wstring modelFile, capturePath;
-        bool  hasCam = false;
+        bool  hasCam = false, hasCamDistance = false;
         float camAzimuth = 0.0f, camElevation = 10.0f, camDistance = 7.5f;
         for (size_t i = 1; i < args.size(); i++)
         {
@@ -1492,7 +1492,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
             else if (args[i] == L"--camera-elevation" && i + 1 < args.size())
                 { camElevation = (float)_wtof(args[++i].c_str()); hasCam = true; }
             else if (args[i] == L"--camera-distance" && i + 1 < args.size())
-                { camDistance = (float)_wtof(args[++i].c_str()); hasCam = true; }
+                { camDistance = (float)_wtof(args[++i].c_str()); hasCam = true; hasCamDistance = true; }
             else if (modelFile.empty())
                 modelFile = args[i];
         }
@@ -1504,26 +1504,58 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 
         if (!capturePath.empty() && info.engine != NULL)
         {
-            // Frame the scene looking at the origin, then request a one-shot headless capture
-            // (saved before present; quits). With --camera-* flags, orbit the origin by azimuth
-            // (deg around +Z; 0 = front / -Y), elevation (deg above the XY plane) and distance
-            // (world units); otherwise keep the default front-slightly-above framing.
+            // Frame the model by its ACTUAL bounding box rather than the origin: look at
+            // the box center and pull back far enough that the whole model fits the
+            // vertical FOV. Model pivots usually sit at the base, so the geometry extends
+            // upward from the origin -- targeting the origin pushes the model into the top
+            // of the frame. Aggregating the per-mesh bounds and centering on them makes
+            // every model frame well, headlessly, with no per-model camera tuning.
+            //   --camera-azimuth/--camera-elevation orbit the box center (default: a 3/4 view).
+            //   --camera-distance overrides the auto-fit distance when given.
+            Vector3 center(0.0f, 0.0f, 0.0f);
+            float   radius = 7.5f;   // fallback if no usable bounds are exposed
+            const Model* mdl = NULL;
+            if (info.object != NULL && info.object->GetTemplate() != NULL)
+                mdl = info.object->GetTemplate()->GetModel();
+            if (mdl != NULL && mdl->GetNumMeshes() > 0)
+            {
+                Vector3 mn( 1e30f,  1e30f,  1e30f);
+                Vector3 mx(-1e30f, -1e30f, -1e30f);
+                bool any = false;
+                for (size_t i = 0; i < mdl->GetNumMeshes(); i++)
+                {
+                    const Model::Mesh& me = mdl->GetMesh(i);
+                    if (!me.isVisible) continue;
+                    const BoundingBox& b = me.bounds;
+                    // Skip empty / inverted boxes (non-geometry or unbounded meshes).
+                    if (b.max.x < b.min.x || b.max.y < b.min.y || b.max.z < b.min.z) continue;
+                    mn.x = fminf(mn.x, b.min.x); mn.y = fminf(mn.y, b.min.y); mn.z = fminf(mn.z, b.min.z);
+                    mx.x = fmaxf(mx.x, b.max.x); mx.y = fmaxf(mx.y, b.max.y); mx.z = fmaxf(mx.z, b.max.z);
+                    any = true;
+                }
+                if (any)
+                {
+                    center = Vector3(0.5f*(mn.x+mx.x), 0.5f*(mn.y+mx.y), 0.5f*(mn.z+mx.z));
+                    Vector3 ext(mx.x-mn.x, mx.y-mn.y, mx.z-mn.z);
+                    radius = 0.5f * ext.length();        // bounding-sphere radius
+                    if (radius < 1e-3f) radius = 1.0f;
+                }
+            }
+
+            const float DEG2RAD = 3.14159265358979f / 180.0f;
+            // Fit the bounding sphere to the 45-deg vertical FOV, with a margin.
+            float fitDist = radius / sinf(0.5f * 45.0f * DEG2RAD) * 1.25f;
+            float az   = (hasCam ? camAzimuth   : 35.0f) * DEG2RAD;  // default 3/4 view
+            float el   = (hasCam ? camElevation : 20.0f) * DEG2RAD;
+            float dist = hasCamDistance ? camDistance : fitDist;
+
             Camera cam;
-            cam.m_target = Vector3(0.0f, 0.0f, 0.0f);
+            cam.m_target = center;
             cam.m_up     = Vector3(0.0f, 0.0f, 1.0f);
-            if (hasCam)
-            {
-                const float DEG2RAD = 3.14159265358979f / 180.0f;
-                float az = camAzimuth * DEG2RAD, el = camElevation * DEG2RAD;
-                float h  = cosf(el);
-                cam.m_position = Vector3( camDistance * h * sinf(az),
-                                        -camDistance * h * cosf(az),
-                                         camDistance * sinf(el) );
-            }
-            else
-            {
-                cam.m_position = Vector3(0.0f, -7.5f, 1.4f);
-            }
+            float h = cosf(el);
+            cam.m_position = Vector3( center.x + dist * h * sinf(az),
+                                      center.y - dist * h * cosf(az),
+                                      center.z + dist * sinf(el) );
             info.engine->SetCamera(cam);
             info.engine->RequestCapture(capturePath);
         }

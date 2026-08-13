@@ -25,11 +25,10 @@ Alamo shaders compile for it, its textures resolve, and it actually displays.
 The only ground truth for that has historically been "open it in AloViewer and
 look." This mode turns that visual check into a command you can run in a script.
 
-It was built to verify the [max2alamo](https://example.com/private-tool)
-`alo_material` editor — a headless tool that retextures / re-shaders an `.alo` by
-chunk surgery. After an edit, this mode renders the result and confirms the
-engine loads the new texture and the model still shades, which no byte-oracle
-can establish.
+It is especially useful for verifying tools that edit an `.alo` by chunk surgery
+(retexturing or re-shading a model). After such an edit, this mode renders the
+result and confirms the engine loads the new texture and the model still shades —
+something no byte-level oracle can establish.
 
 ## Usage
 
